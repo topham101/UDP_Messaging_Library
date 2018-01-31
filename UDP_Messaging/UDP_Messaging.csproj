@@ -51,6 +51,7 @@
     <Compile Include="Exceptions\ConnectionException.cs" />
     <Compile Include="HammingEncoder.cs" />
     <Compile Include="MessagingHost.cs" />
+    <Compile Include="PacketChecker.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ProtocolHandler.cs" />
   </ItemGroup>

@@ -23,10 +23,10 @@ namespace UDP_Messaging
         /// <param name="protocolCode">The protocol code.</param>
         /// <param name="content">The message content.</param>
         /// <returns>A protocol compliant message.</returns>
-        public static string BuildMessage(Protocol protocolCode, string content = "")
+        public static string BuildMessage(byte packetNumber, Protocol protocolCode, string content = "")
         {
             string code = ((int)protocolCode).ToString("00"); // gets the integer value of the enum as a two digit string
-            return $"{code} {protocolCode.ToString()}\r\n{content.Length}\r\n\r\n{content}";
+            return $"{packetNumber}~{code} {protocolCode.ToString()}\r\n{content.Length}\r\n\r\n{content}";
         }
 
         /// <summary>
@@ -34,13 +34,19 @@ namespace UDP_Messaging
         /// </summary>
         /// <param name="message">The protocol compliant message.</param>
         /// <returns>The protocol used and the message content.</returns>
-        public static Tuple<Protocol, string> InterpretMessage(string message)
+        public static Tuple<byte, Protocol, string> InterpretMessage(string message)
         {
+            byte packetNumber;
             string content = string.Empty;
             Protocol protocol;
 
             try // Interpret message here
             {
+                // PacketNumber
+                int endOfPN = message.IndexOf('~');
+                packetNumber = byte.Parse(message.Substring(0, endOfPN));
+                message = message.Substring(endOfPN + 1);
+
                 // Protocol ID
                 int protocolID = int.Parse(message.Substring(0, 2));
                 if (!Enum.IsDefined(typeof(Protocol), protocolID))
@@ -52,7 +58,7 @@ namespace UDP_Messaging
                 string protocolName = message.Substring(2, pointer - 2);
                 if (!Enum.TryParse<Protocol>(protocolName, out _))
                     throw new InvalidCastException("Invalid Protocol Name");
-
+                
                 // Get Content Length
                 pointer += 2;
                 int pointer2 = message.IndexOf("\r\n\r\n");
@@ -67,12 +73,12 @@ namespace UDP_Messaging
                         throw new Exception("Invalid message content. Data missing.");
                 }
             }
-            catch (Exception)
+            catch
             {
                 return null;
             }
 
-            return new Tuple<Protocol, string>(protocol, content);
+            return new Tuple<byte, Protocol, string>(packetNumber, protocol, content);
         }
     }
 }

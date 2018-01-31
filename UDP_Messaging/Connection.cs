@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using System.Collections;
+using System.Threading;
 
 namespace UDP_Messaging
 {
@@ -80,9 +81,19 @@ namespace UDP_Messaging
         }
         internal string Receive()
         {
-            return Encoding.ASCII.GetString(
-                        HammingEncoder.DecodeBits(
-                            receiver.Receive(ref blankEP)));
+            byte[] bytes;
+            while (true)
+            {
+                try
+                {
+                    bytes = receiver.Receive(ref blankEP);
+                    break;
+                }
+                catch (SocketException e)
+                {
+                }
+            }
+            return Encoding.ASCII.GetString(HammingEncoder.DecodeBits(bytes));
         }
         internal string Receive(ref IPEndPoint tempEP)
         {

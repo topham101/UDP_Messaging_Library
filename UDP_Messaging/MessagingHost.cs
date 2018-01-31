@@ -10,6 +10,7 @@ namespace UDP_Messaging
     public delegate void MessageEvent(string message);
     public delegate void StatusChangedEvent(ConnectionState NewState);
     public delegate void ConnectionClosedEvent(ConnectionLossType message);
+    public delegate void ConnectionIssuesEvent(ConnectionIssue connectionIssue);
 
     /// <summary>
     /// A simple UDP messaging library for point to point communications between two clients.
@@ -120,6 +121,17 @@ namespace UDP_Messaging
             remove
             {
                 connectionManager.ConnectionClosed -= value;
+            }
+        }
+        public event ConnectionIssuesEvent ConnectionIssues
+        {
+            add
+            {
+                connectionManager.ConnectionIssues += value;
+            }
+            remove
+            {
+                connectionManager.ConnectionIssues -= value;
             }
         }
 

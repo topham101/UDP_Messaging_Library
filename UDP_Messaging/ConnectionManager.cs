@@ -23,6 +23,10 @@ namespace UDP_Messaging
         Local_Disconnect,
         Timeout,
     }
+    public enum ConnectionIssue
+    {
+        SuspectedPacketLoss
+    }
 
     /// <summary>
     /// Provides High(er)-Level functionality for the Connection Class.
@@ -40,11 +44,23 @@ namespace UDP_Messaging
         private Timer pollingService;
         private Timer connectionStatusService;
         private Stopwatch lastConnectionTestStopwatch;
+        private PacketChecker packetChecker = new PacketChecker();
 
         internal CancellationTokenSource ConnectionToken { get; set; }
 
         public event MessageEvent MessageReceived;
         public event ConnectionClosedEvent ConnectionClosed;
+        public event ConnectionIssuesEvent ConnectionIssues
+        {
+            add
+            {
+                packetChecker.ConnectionIssues += value;
+            }
+            remove
+            {
+                packetChecker.ConnectionIssues -= value;
+            }
+        }
 
         internal ConnectionManager(Connection connection, int _timeout = 400)
         {
@@ -52,6 +68,8 @@ namespace UDP_Messaging
             timeout = _timeout;
             ConnectionToken = new CancellationTokenSource();
             pollingService = new Timer(Poll, null, -1, pollSpeed);
+
+            connection.ConnectionStatusChanged += RefreshPacketChecker;
         }
 
         internal void Listen()
@@ -60,7 +78,7 @@ namespace UDP_Messaging
             connection.Setup();
             
             Stopwatch sw = new Stopwatch();
-            Tuple<Protocol, string> message = null;
+            Tuple<byte, Protocol, string> message = null;
             var ep = new IPEndPoint(IPAddress.Parse("0.0.0.0"), 0);
 
             while (!ConnectionToken.IsCancellationRequested)
@@ -70,8 +88,8 @@ namespace UDP_Messaging
                 {
                     string received = connection.Receive(ref ep);
                     message = ProtocolHandler.InterpretMessage(received);
-                    if (message != null &&
-                        message.Item1 == Protocol.Connection_Request)
+                    if (message != null && packetChecker.CheckPacket(message.Item1) &&
+                        message.Item2 == Protocol.Connection_Request)
                         break;
                 }
                 int timeLeft = listenerPollSpeed - sw.Elapsed.Milliseconds;
@@ -98,7 +116,7 @@ namespace UDP_Messaging
             var pollStopwatch = new Stopwatch();
             var timeoutStopWatch = new Stopwatch();
             timeoutStopWatch.Start();
-            Tuple<Protocol, string> message = null;
+            Tuple<byte, Protocol, string> message = null;
             while (!ConnectionToken.IsCancellationRequested
                 && timeoutStopWatch.ElapsedMilliseconds < connectTimeout)
             {
@@ -108,7 +126,7 @@ namespace UDP_Messaging
                 {
                     string received = connection.Receive();
                     message = ProtocolHandler.InterpretMessage(received);
-                    if (message != null)
+                    if (message != null || !packetChecker.CheckPacket(message.Item1))
                         break;
                 }
                 int timeLeft = listenerPollSpeed - pollStopwatch.Elapsed.Milliseconds;
@@ -120,7 +138,7 @@ namespace UDP_Messaging
             if (ConnectionToken.IsCancellationRequested)
                 return;
 
-            if (message != null && message.Item1 == Protocol.Connection_Accepted)
+            if (message != null && message.Item2 == Protocol.Connection_Accepted)
             {
                 connection.ConnectionState = ConnectionState.Connected;
                 PollServiceStart();
@@ -155,12 +173,22 @@ namespace UDP_Messaging
         }
         internal void Send(Protocol protocol, string message = "")
         {
-            connection.Send(ProtocolHandler.BuildMessage(protocol, message));
+            bool increment = true;
+            if (protocol == Protocol.Connection_Test || protocol == Protocol.Connection_Test_Response)
+                increment = false;
+
+            connection.Send(ProtocolHandler.BuildMessage(packetChecker.GetPacketNumber(increment), protocol, message));
         }
 
-        private Tuple<Protocol, string> Receive()
+        private Tuple<byte, Protocol, string> Receive()
         {
-            return ProtocolHandler.InterpretMessage(connection.Receive());
+            var message = ProtocolHandler.InterpretMessage(connection.Receive());
+            if (message.Item2 == Protocol.Connection_Test || message.Item2 == Protocol.Connection_Test_Response)
+                return message;
+
+            bool isValid = packetChecker.CheckPacket(message.Item1);
+            
+            return isValid ? message : null;
         }
 
         private void PollServiceStart()
@@ -174,9 +202,12 @@ namespace UDP_Messaging
                 MessageHandler(Receive());
             }
         }
-        private void MessageHandler(Tuple<Protocol, string> message)
+        private void MessageHandler(Tuple<byte, Protocol, string> message)
         {
-            switch (message.Item1)
+            if (message == null)
+                return;
+
+            switch (message.Item2)
             {
                 case Protocol.Connection_Test:
                     Send(Protocol.Connection_Test_Response);
@@ -185,7 +216,7 @@ namespace UDP_Messaging
                     lastConnectionTestStopwatch.Restart();
                     break;
                 case Protocol.Content_Message:
-                    MessageReceived?.Invoke(message.Item2);
+                    MessageReceived?.Invoke(message.Item3);
                     break;
                 case Protocol.Connection_Close:
                     Stop(ConnectionLossType.EndPoint_Disconnect);
@@ -213,6 +244,22 @@ namespace UDP_Messaging
                 Stop(ConnectionLossType.Timeout);
             }
         }
-
+        private void RefreshPacketChecker(ConnectionState state)
+        {
+            switch (state)
+            {
+                case ConnectionState.Offline:
+                    packetChecker = new PacketChecker();
+                    break;
+                case ConnectionState.Connecting:
+                case ConnectionState.Pending_Connection:
+                    packetChecker.Reset();
+                    break;
+                case ConnectionState.Connected:
+                    break;
+                default:
+                    throw new NotImplementedException();
+            }
+        }
     }
 }
